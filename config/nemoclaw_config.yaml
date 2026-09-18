@@ -1,0 +1,17 @@
+sandbox:
+  name: mac-hermes-agent
+  runtime: docker
+  isolation:
+    landlock: true
+    seccomp: true
+    network_policy:
+      allowed_egress:
+        - "generativelanguage.googleapis.com:443"
+        - "github.com:443"
+        - "pypi.org:443"
+
+agent:
+  name: hermes
+  provider: gemini
+  model: gemini-2.5-flash
+  skills_dir: "./skills"

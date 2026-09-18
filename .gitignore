@@ -1,0 +1,36 @@
+# Credentials and secret configuration
+config/credentials.env
+*.env
+*.pem
+*.key
+
+# Python files and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# NemoClaw & OpenShell runtime artifacts
+nemoclaw_src/
+.nemoclaw/
+logs/
+*.log
+*.sqlite
+*.db
+
+# macOS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*~
