@@ -11,19 +11,23 @@ from usecases.gemini_client import get_client, send_prompt
 from google.genai import errors
 
 class TestGeminiClient(unittest.TestCase):
+    """Test suite for the Gemini API client module."""
 
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True)
-    def test_get_client_success(self):
+    def test_get_client_success(self) -> None:
+        """Test successful client creation."""
         client = get_client()
         self.assertIsNotNone(client)
 
     @patch.dict(os.environ, clear=True)
-    def test_get_client_missing_key(self):
+    def test_get_client_missing_key(self) -> None:
+        """Test client creation fails without API key."""
         with self.assertRaises(ValueError):
             get_client()
 
     @patch('usecases.gemini_client.get_client')
-    def test_send_prompt_success(self, mock_get_client):
+    def test_send_prompt_success(self, mock_get_client) -> None:
+        """Test sending a prompt successfully."""
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.text = "Here is your bash command:\n```bash\nkill -9 1234\n```"
@@ -35,7 +39,8 @@ class TestGeminiClient(unittest.TestCase):
         mock_client.models.generate_content.assert_called_once()
 
     @patch('usecases.gemini_client.get_client')
-    def test_send_prompt_with_context(self, mock_get_client):
+    def test_send_prompt_with_context(self, mock_get_client) -> None:
+        """Test sending a prompt with conversational context."""
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.text = "Got it."
@@ -47,7 +52,8 @@ class TestGeminiClient(unittest.TestCase):
         self.assertEqual(response, "Got it.")
 
     @patch('usecases.gemini_client.get_client')
-    def test_send_prompt_auth_failure(self, mock_get_client):
+    def test_send_prompt_auth_failure(self, mock_get_client) -> None:
+        """Test sending a prompt handles API authentication errors."""
         mock_client = MagicMock()
 
         # Create a mock API error correctly
