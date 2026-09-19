@@ -8,6 +8,15 @@ from typing import List, Dict
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'credentials.env'))
 
 def get_client() -> genai.Client:
+    """
+    Initializes and returns a Gemini client.
+
+    Returns:
+        genai.Client: An initialized Gemini client.
+
+    Raises:
+        ValueError: If GEMINI_API_KEY is not set.
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("[Error] GEMINI_API_KEY environment variable not set or found in config/credentials.env.", file=sys.stderr)

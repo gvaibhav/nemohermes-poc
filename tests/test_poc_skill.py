@@ -39,16 +39,16 @@ from usecases.poc_toil_reduction_skill import (
 class TestRogueProcessLifecycle(unittest.TestCase):
     """Tests for spawning and killing rogue processes."""
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         """Guarantee no leaked processes after each test."""
         cleanup_all_spawned()
 
-    def test_start_rogue_process_returns_valid_pid(self):
+    def test_start_rogue_process_returns_valid_pid(self) -> None:
         """start_rogue_process() should return a positive PID."""
         pid = start_rogue_process()
         self.assertGreater(pid, 0)
 
-    def test_rogue_process_can_be_killed(self):
+    def test_rogue_process_can_be_killed(self) -> None:
         """A spawned rogue process should be killable via SIGKILL."""
         pid = start_rogue_process()
         killed = _safe_kill(pid)
@@ -60,18 +60,18 @@ class TestRogueProcessLifecycle(unittest.TestCase):
 class TestSkillFileOperations(unittest.TestCase):
     """Tests for SKILL.md creation, content, and parsing."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Remove any existing SKILL.md before each test."""
         if SKILL_FILE.exists():
             SKILL_FILE.unlink()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         """Clean up generated SKILL.md after each test."""
         if SKILL_FILE.exists():
             SKILL_FILE.unlink()
         cleanup_all_spawned()
 
-    def test_skill_directory_creation(self):
+    def test_skill_directory_creation(self) -> None:
         """simulate_turn_2() should create the skills directory."""
         if SKILLS_DIR.exists():
             import shutil
@@ -80,7 +80,7 @@ class TestSkillFileOperations(unittest.TestCase):
         self.assertTrue(SKILLS_DIR.exists())
         self.assertTrue(SKILL_FILE.exists())
 
-    def test_skill_file_has_yaml_frontmatter(self):
+    def test_skill_file_has_yaml_frontmatter(self) -> None:
         """Generated SKILL.md should contain valid YAML frontmatter."""
         simulate_turn_2()
         content = SKILL_FILE.read_text()
@@ -90,7 +90,7 @@ class TestSkillFileOperations(unittest.TestCase):
         self.assertGreaterEqual(len(parts), 3,
                                 "SKILL.md missing YAML frontmatter delimiters")
 
-    def test_skill_file_contains_required_fields(self):
+    def test_skill_file_contains_required_fields(self) -> None:
         """Frontmatter should have name, description, triggers, version."""
         simulate_turn_2()
         import yaml
@@ -103,21 +103,21 @@ class TestSkillFileOperations(unittest.TestCase):
         self.assertIn("version", meta)
         self.assertIn("description", meta)
 
-    def test_skill_triggers_include_cpu_sweep(self):
+    def test_skill_triggers_include_cpu_sweep(self) -> None:
         """At least one trigger should match 'cpu sweep' (case-insensitive)."""
         simulate_turn_2()
         triggers = parse_skill_triggers(SKILL_FILE)
         matched = any("cpu sweep" in t.lower() for t in triggers)
         self.assertTrue(matched, f"No 'cpu sweep' trigger found: {triggers}")
 
-    def test_skill_body_contains_action_commands(self):
+    def test_skill_body_contains_action_commands(self) -> None:
         """SKILL.md body should document the ps and pkill commands."""
         simulate_turn_2()
         content = SKILL_FILE.read_text()
         self.assertIn("ps aux", content)
         self.assertIn("pkill", content)
 
-    def test_parse_skill_triggers_empty_file(self):
+    def test_parse_skill_triggers_empty_file(self) -> None:
         """parse_skill_triggers on a non-YAML file returns empty list."""
         SKILLS_DIR.mkdir(parents=True, exist_ok=True)
         SKILL_FILE.write_text("no frontmatter here")
@@ -128,16 +128,18 @@ class TestSkillFileOperations(unittest.TestCase):
 class TestTurnSimulations(unittest.TestCase):
     """Integration tests for the full 3-turn PoC sequence."""
 
-    def setUp(self):
+    def setUp(self) -> None:
+        """Ensure test environment is clean."""
         if SKILL_FILE.exists():
             SKILL_FILE.unlink()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
+        """Clean up test environment."""
         if SKILL_FILE.exists():
             SKILL_FILE.unlink()
         cleanup_all_spawned()
 
-    def test_turn_1_kills_rogue_process(self):
+    def test_turn_1_kills_rogue_process(self) -> None:
         """Turn 1 should terminate the provided rogue PID."""
         pid = start_rogue_process()
         simulate_turn_1(pid)
@@ -149,18 +151,18 @@ class TestTurnSimulations(unittest.TestCase):
         except ProcessLookupError:
             pass  # expected — process is dead
 
-    def test_turn_2_creates_skill_file(self):
+    def test_turn_2_creates_skill_file(self) -> None:
         """Turn 2 should produce a SKILL.md file."""
         simulate_turn_2()
         self.assertTrue(SKILL_FILE.exists())
 
-    def test_turn_3_requires_skill_file(self):
+    def test_turn_3_requires_skill_file(self) -> None:
         """Turn 3 should raise if SKILL.md doesn't exist."""
         # Do NOT run Turn 2 first
         with self.assertRaises(RuntimeError):
             simulate_turn_3()
 
-    def test_full_sequence_end_to_end(self):
+    def test_full_sequence_end_to_end(self) -> None:
         """Full Turn 1 → Turn 2 → Turn 3 should complete without error."""
         pid = start_rogue_process()
         simulate_turn_1(pid)
