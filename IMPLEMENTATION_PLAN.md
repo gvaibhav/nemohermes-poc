@@ -1,80 +1,239 @@
-# NemoClaw Hermes Agent Deployment & Maker-Checker Execution Plan for Jules
+# NemoHermes — Architecture & Implementation Plan
 
-This plan details the setup of **NVIDIA NemoClaw** with a **Hermes Agent** on macOS using **Docker Desktop** and **Google Gemini API**, along with a structured **Maker-Checker Combo** tailored for delegation to `jules.google.com`.
+## 1. Configuration Overview
 
-## Configuration Overview
-
-- **Host OS**: macOS
-- **Container Engine**: Docker Desktop
-- **LLM Provider**: Google Gemini API via `GEMINI_API_KEY` (Google AI Studio / Google AI Pro subscription)
-- **Primary Usecase / PoC**: *Toil Reduction via SKILL.md (Self-Evolving Runbooks)*
+| Parameter | Value |
+|---|---|
+| **Host OS** | macOS (Apple Silicon or Intel) |
+| **Container Engine** | Docker Desktop |
+| **LLM Provider** | Google Gemini API via `GEMINI_API_KEY` |
+| **Agent Framework** | NVIDIA NemoClaw → Hermes Agent (`nemohermes`) |
+| **Sandbox Runtime** | NVIDIA OpenShell (Docker-based isolation) |
+| **Primary PoC** | Toil Reduction via SKILL.md (Self-Evolving Runbooks) |
+| **Reference Docs** | [NemoClaw GitHub](https://github.com/NVIDIA/nemoclaw) · [OpenClaw User Guide](https://docs.nvidia.com/nemoclaw/user-guide/openclaw/home) |
 
 ---
 
-## PoC Architecture: Toil Reduction via SKILL.md
+## 2. System Architecture
+
+### 2.1 Component Diagram
+
+```mermaid
+flowchart TD
+    User["User / Jules Agent"]
+    Setup["scripts/setup_nemoclaw.sh"]
+    Config["credentials.env + nemoclaw_config.yaml"]
+    PoC["usecases/poc_toil_reduction_skill.py"]
+    Tests["tests/test_poc_skill.py"]
+    SkillStore["skills/cpu_sweep/SKILL.md"]
+    NemoClaw["NemoClaw Governance Engine"]
+    Hermes["Hermes Agent - nemohermes"]
+    Landlock["Landlock FS Isolation"]
+    Seccomp["seccomp Syscall Filter"]
+    OPA["OPA Network Egress Policy"]
+    Gemini["Google Gemini API"]
+    GitHub["github.com"]
+
+    User --> PoC
+    User --> Tests
+    Setup --> Config
+    PoC --> Hermes
+    PoC --> SkillStore
+    Hermes --> NemoClaw
+    Hermes --> Gemini
+    NemoClaw --> Landlock
+    NemoClaw --> Seccomp
+    NemoClaw --> OPA
+    OPA -.->|"allowed egress"| Gemini
+    OPA -.->|"allowed egress"| GitHub
+```
+
+### 2.2 Data Flow: PoC Execution
+
+```mermaid
+flowchart LR
+    Cred["GEMINI_API_KEY"] --> Runner
+    Conf["nemoclaw_config.yaml"] --> Runner
+
+    subgraph Runner["PoC Runner"]
+        T1["Turn 1: Diagnose and Kill"] --> T2["Turn 2: Codify SKILL.md"] --> T3["Turn 3: Fresh Session Replay"]
+    end
+
+    T2 --> Skill["skills/cpu_sweep/SKILL.md"]
+    T3 --> Skill
+    Runner --> Log["stdout execution log"]
+```
+
+---
+
+## 3. PoC Design: Toil Reduction via SKILL.md
+
+### 3.1 Concept
+A Hermes agent learns a tribal-knowledge SRE task through interactive dialogue, codifies the procedure into a persistent `SKILL.md` file with YAML frontmatter, and in a **fresh session** (no prior context) replays the runbook immediately upon hearing the trigger phrase — proving the agent acts as a **living runbook**.
+
+### 3.2 Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User
-    participant Hermes as Hermes Agent (nemohermes)
+    participant Runner as PoC Runner
+    participant Hermes as Hermes Agent
     participant OS as OpenShell Container
     participant Skill as SKILL.md Store
 
-    Note over OS: Rogue process started: bash while true; do leak...
-    User->>Hermes: "The system feels sluggish. Find process consuming most CPU and terminate it."
-    Hermes->>OS: Executes ps aux --sort=-%cpu | head -n 5
-    OS-->>Hermes: Returns PID & process info
-    Hermes->>OS: Executes kill -9 <PID>
-    
-    User->>Hermes: "Good job. Whenever I say 'Run standard CPU sweep', save this to your skills."
-    Hermes->>Skill: Codifies command sequence into SKILL.md
-    
-    Note over Hermes: Session Closed / Context Window Reset
-    Note over OS: Rogue process started again
-    
-    User->>Hermes: "Run the standard CPU sweep."
-    Hermes->>Skill: Reads SKILL.md trigger
-    Hermes->>OS: Immediately executes codified kill sequence (Bypasses Re-reasoning)
+    Note over OS: Rogue process spawned
+
+    Note right of User: TURN 1 - Diagnostic and Kill
+    User->>Runner: The system feels sluggish...
+    Runner->>OS: ps -p PID -o pid,pcpu,comm
+    OS-->>Runner: PID 99 percent CPU bash
+    Runner->>OS: kill -9 PID
+    OS-->>Runner: Process terminated
+
+    Note right of User: TURN 2 - Skill Codification
+    User->>Runner: Save this as Run the standard CPU sweep
+    Runner->>Skill: Write YAML frontmatter and action sequence
+    Note over Skill: name cpu_sweep, triggers Run the standard CPU sweep
+
+    Note over Runner: Context window reset - new session
+    Note over OS: New rogue process spawned
+
+    Note right of User: TURN 3 - Fresh Context Verification
+    User->>Runner: Run the standard CPU sweep
+    Runner->>Skill: Parse YAML triggers
+    Skill-->>Runner: Trigger match found
+    Runner->>OS: kill -9 new PID
+    OS-->>Runner: Process terminated
+    Note over Runner: Living Runbook Verified
 ```
 
+### 3.3 SKILL.md File Specification
+
+Generated by Turn 2. Must be parseable by `yaml.safe_load()`:
+
+```yaml
 ---
+name: cpu_sweep
+version: "1.0"
+description: Run standard CPU sweep to find and terminate rogue processes.
+triggers:
+  - "Run the standard CPU sweep"
+  - "CPU sweep"
+  - "standard CPU sweep"
+author: hermes-agent
+---
+```
 
-## Maker-Checker Combo Specification for Jules
-
-### 1. Maker Specification (`prompts/jules_maker_prompt.md`)
-The **Maker** prompt instructs Jules to set up environment, clone repo, install NemoClaw & Hermes with Gemini API credentials, configure OpenShell sandbox in Docker Desktop, and implement the **Toil Reduction via SKILL.md** PoC script and test suite.
-
-- **Step 1: Environment & Repository Setup**
-  - Clone `https://github.com/NVIDIA/nemoclaw.git`.
-  - Verify Docker Desktop and Python 3.10+.
-- **Step 2: NemoClaw & Hermes Installation**
-  - Run onboarding CLI: `NEMOCLAW_AGENT=hermes NEMOCLAW_SANDBOX_NAME=mac-hermes-agent`.
-  - Configure `GEMINI_API_KEY` for Google Gemini model access.
-- **Step 3: PoC Implementation**
-  - Create rogue process simulation in OpenShell container.
-  - Automate Turn 1 (Diagnostic & Kill), Turn 2 (SKILL.md codification), and Turn 3 (Fresh session execution of `"Run the standard CPU sweep"`).
-
-### 2. Checker Specification (`prompts/jules_checker_prompt.md`)
-The **Checker** prompt instructs Jules to review, test, audit security policies, and verify execution logs of the Maker's output.
-
-- **Check 1: Environment & Gemini API Audit**
-  - Verify Docker Desktop container status and `nemoclaw status`.
-  - Ensure `GEMINI_API_KEY` is kept secure and out of git repository.
-- **Check 2: PoC Milestone Verification**
-  - Verify Turn 1 process termination.
-  - Verify Turn 2 `skills/cpu_sweep/SKILL.md` content and formatting.
-  - Verify Turn 3 instant execution without re-reasoning in a fresh context window.
-- **Check 3: Report Generation**
-  - Generate `CHECKER_REPORT.md`.
+Followed by Markdown body with `## Action Sequence` containing fenced bash blocks.
 
 ---
 
-## Verification Plan
+## 4. Component Details
 
-### Automated Tests
-- Verification of NemoClaw sandbox status: `nemoclaw status`
-- Execution of Maker test suite against Hermes agent: `python3 -m unittest discover -s tests`
+### 4.1 `usecases/poc_toil_reduction_skill.py`
 
-### Manual Verification
-- Invoking `poc_toil_reduction_skill.py` and reviewing generated `SKILL.md`.
+The core PoC runner. Key design decisions:
+
+| Aspect | Design |
+|---|---|
+| **Path resolution** | `PROJECT_ROOT = Path(__file__).resolve().parent.parent` — works from any cwd |
+| **Process tracking** | Global `_spawned_pids` list; `cleanup_all_spawned()` in `finally` block |
+| **Process verification** | `ps -p PID` (targeted, not system-wide `pkill`) |
+| **Skill parsing** | `parse_skill_triggers()` reads YAML frontmatter via `yaml.safe_load()` |
+| **Error handling** | Each turn raises `RuntimeError` on failure; `main()` catches and returns exit code |
+| **Cleanup guarantee** | `finally` block in `main()` ensures no orphan processes |
+
+### 4.2 `tests/test_poc_skill.py`
+
+11 test cases across 3 test classes:
+
+| Class | Tests | What It Validates |
+|---|---|---|
+| `TestRogueProcessLifecycle` | 2 | PID validity, process killability |
+| `TestSkillFileOperations` | 6 | Directory creation, YAML frontmatter validity, required fields, trigger parsing, action commands, edge cases |
+| `TestTurnSimulations` | 3 | Turn 1 kills process, Turn 2 creates SKILL.md, Turn 3 raises without SKILL.md, full end-to-end sequence |
+
+Every test has `tearDown()` calling `cleanup_all_spawned()` + removing generated files.
+
+### 4.3 `scripts/setup_nemoclaw.sh`
+
+Idempotent setup script. Key features:
+- Resolves project root from script location (`BASH_SOURCE`), not cwd
+- Uses `set -euo pipefail` for strict error handling
+- Sources `credentials.env` via `set -a` (handles quotes and spaces)
+- Validates `GEMINI_API_KEY` is not the placeholder value
+- Gracefully handles clone/install failures with warnings (not crashes)
+
+### 4.4 `config/nemoclaw_config.yaml`
+
+Sandbox isolation policy template:
+
+```yaml
+sandbox:
+  isolation:
+    landlock: true          # Linux filesystem restriction (active inside container)
+    seccomp: true           # Syscall filtering
+    network_policy:
+      allowed_egress:
+        - "generativelanguage.googleapis.com:443"  # Gemini API
+        - "github.com:443"                          # Source repos
+        - "pypi.org:443"                            # Python packages
+```
+
+> **Note**: Landlock and seccomp are Linux kernel features enforced *inside* the Docker container. macOS host uses Docker's own hypervisor isolation layer.
+
+---
+
+## 5. Gemini API Integration
+
+| Parameter | Value |
+|---|---|
+| **SDK** | `google-genai>=1.0.0` (in `requirements.txt`) |
+| **Auth** | `GEMINI_API_KEY` env var or `config/credentials.env` |
+| **Model** | `gemini-2.5-flash` (configurable in `nemoclaw_config.yaml`) |
+| **Endpoint** | `generativelanguage.googleapis.com:443` |
+| **Cost** | Within \$10/month Google AI Pro allowance |
+
+The Hermes agent has a **native Gemini provider** that translates its internal tool/message loop directly into Gemini's `generateContent` API — no OpenAI compatibility wrapper needed.
+
+---
+
+## 6. Maker-Checker Execution Flow
+
+```mermaid
+flowchart LR
+    M1["Clone repo"] --> M2["Run setup script"]
+    M2 --> M3["Enhance PoC code"]
+    M3 --> M4["Run tests"]
+    M4 --> M5["Open PR"]
+    M5 --> C1["Review PR diff"]
+    C1 --> C2["Run test suite"]
+    C2 --> C3["Audit secrets"]
+    C3 --> C4["Validate SKILL.md"]
+    C4 --> C5["Generate CHECKER_REPORT.md"]
+```
+
+See:
+- [`prompts/jules_maker_prompt.md`](prompts/jules_maker_prompt.md) for Maker task spec
+- [`prompts/jules_checker_prompt.md`](prompts/jules_checker_prompt.md) for Checker audit spec
+
+---
+
+## 7. Verification Plan
+
+### Automated
+```bash
+# Unit + integration tests (11 cases)
+python3 -m unittest discover -s tests -v
+
+# PoC end-to-end run
+python3 usecases/poc_toil_reduction_skill.py
+
+# Secret leak scan
+git grep -i "api_key\|secret\|token\|password" -- ':!*.example' ':!*.md'
+```
+
+### Manual
+- Inspect generated `skills/cpu_sweep/SKILL.md` for correct YAML frontmatter
+- Verify no orphan bash processes left after PoC run: `ps aux | grep "while true"`
