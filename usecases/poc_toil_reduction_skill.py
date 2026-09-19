@@ -21,6 +21,14 @@ from typing import Optional
 
 # Resolve project root relative to this file, not cwd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from usecases.gemini_client import send_prompt
+import argparse
+
+
+
+# Resolve project root relative to this file, not cwd
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = PROJECT_ROOT / "skills" / "cpu_sweep"
 SKILL_FILE = SKILLS_DIR / "SKILL.md"
 
@@ -50,6 +58,10 @@ def _safe_kill(pid: int) -> bool:
     """Attempt to kill a single process by PID. Returns True if killed."""
     try:
         os.kill(pid, signal.SIGKILL)
+        try:
+            os.waitpid(pid, 0)
+        except ChildProcessError:
+            pass
         return True
     except ProcessLookupError:
         return True  # already dead
@@ -79,7 +91,7 @@ def _find_process(pid: int) -> Optional[str]:
     return None
 
 
-def simulate_turn_1(pid: int) -> None:
+def simulate_turn_1(pid: int, live: bool = False) -> None:
     """Turn 1: Diagnostic & Process Termination.
 
     Simulates:
@@ -91,6 +103,32 @@ def simulate_turn_1(pid: int) -> None:
           "the most CPU and terminate it.'")
 
     print("[Hermes Action] Executing: ps -p <PID> -o pid,pcpu,comm")
+    if live:
+        print("[Hermes Action (Live)] Querying Gemini to resolve the issue...")
+        prompt = f"The system feels sluggish. Find the process consuming the most CPU and terminate it. Output only the bash commands to execute, inside a markdown bash code block. If you need a PID, you can assume it is {pid} for this test, but write the real bash commands you would use."
+        try:
+            response = send_prompt(prompt)
+            print(f"[Hermes Response]\n{response}")
+            # Extract bash blocks
+            import re
+            bash_commands = re.findall(r'```bash\n(.*?)\n```', response, re.DOTALL)
+            if not bash_commands:
+                bash_commands = re.findall(r'```\n(.*?)\n```', response, re.DOTALL)
+
+            for cmd in bash_commands:
+                print(f"[Hermes Executing] {cmd.strip()}")
+                subprocess.run(cmd.strip(), shell=True, executable='/bin/bash')
+
+            if _find_process(pid) is None:
+                print("[Hermes Action] ✓ Rogue process terminated successfully.")
+            else:
+                print("[Hermes Action] ✗ Failed to terminate rogue process.")
+                _safe_kill(pid)
+        except Exception as e:
+            print(f"Error querying Gemini: {e}")
+            raise RuntimeError("Live mode failed in Turn 1")
+        return
+
     ps_output = _find_process(pid)
 
     if ps_output is not None:
@@ -113,7 +151,7 @@ def simulate_turn_1(pid: int) -> None:
             raise RuntimeError(f"Could not kill PID {pid}")
 
 
-def simulate_turn_2() -> None:
+def simulate_turn_2(live: bool = False) -> None:
     """Turn 2: Skill Codification.
 
     Simulates:
@@ -129,44 +167,82 @@ def simulate_turn_2() -> None:
           "process. Save this to your skills.'")
 
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    if live:
+        print("[Hermes Action (Live)] Querying Gemini to generate SKILL.md...")
+        prompt = """
+Generate a SKILL.md file for a standard CPU sweep.
+It must include YAML frontmatter starting and ending with ---.
+The frontmatter must contain 'name', 'version', 'description', 'triggers' (a list of strings), and 'author'.
+The body must be markdown and contain '## Action Sequence' with at least one fenced bash code block showing how to identify and kill high CPU processes.
+Do not output anything else besides the file content itself.
+"""
+        try:
+            response = send_prompt(prompt)
+            # Remove markdown formatting if Gemini wrapped the whole response
+            if response.startswith('```markdown'):
+                response = response[11:]
+            if response.endswith('```'):
+                response = response[:-3]
+            response = response.strip()
+
+            # Validate YAML frontmatter
+            parts = response.split("---", 2)
+            if len(parts) >= 3:
+                yaml_str = parts[1]
+                meta = yaml.safe_load(yaml_str)
+                if isinstance(meta, dict) and all(k in meta for k in ['name', 'version', 'description', 'triggers', 'author']):
+                    skill_content = response
+                    print("[Hermes Action] Successfully validated Gemini SKILL.md")
+                else:
+                    raise ValueError("Missing required fields in YAML frontmatter")
+            else:
+                raise ValueError("Missing YAML frontmatter delimiters")
+
+        except Exception as e:
+            print(f"[Hermes Action] Failed to generate/validate SKILL.md from Gemini: {e}")
+            print("[Hermes Action] Falling back to template...")
+            # Fallback happens below
+
+    if 'skill_content' not in locals():
+    # Build skill content with proper YAML frontmatter
 
     # Build skill content with proper YAML frontmatter
-    frontmatter = {
-        "name": "cpu_sweep",
-        "version": "1.0",
-        "description": "Run standard CPU sweep to find and terminate "
-                       "rogue processes consuming excessive CPU.",
-        "triggers": [
-            "Run the standard CPU sweep",
-            "CPU sweep",
-            "standard CPU sweep",
-        ],
-        "author": "hermes-agent",
-    }
+        frontmatter = {
+            "name": "cpu_sweep",
+            "version": "1.0",
+            "description": "Run standard CPU sweep to find and terminate "
+                           "rogue processes consuming excessive CPU.",
+            "triggers": [
+                "Run the standard CPU sweep",
+                "CPU sweep",
+                "standard CPU sweep",
+            ],
+            "author": "hermes-agent",
+        }
 
-    body = """
-# Standard CPU Sweep Runbook
+        body = """
+    # Standard CPU Sweep Runbook
 
-## Description
-Diagnostic and remediation workflow for high CPU load caused by
-runaway or rogue processes.
+    ## Description
+    Diagnostic and remediation workflow for high CPU load caused by
+    runaway or rogue processes.
 
-## Action Sequence
-1. **Identify** high-CPU processes:
-   ```bash
-   ps aux --sort=-%cpu | head -n 5
-   ```
-2. **Terminate** rogue leak processes:
-   ```bash
-   pkill -9 -f "while true; do echo leak"
-   ```
+    ## Action Sequence
+    1. **Identify** high-CPU processes:
+       ```bash
+       ps aux --sort=-%cpu | head -n 5
+       ```
+    2. **Terminate** rogue leak processes:
+       ```bash
+       pkill -9 -f "while true; do echo leak"
+       ```
 
-## Rollback
-If a legitimate process was killed, restart it from the service
-manager or process supervisor.
-"""
+    ## Rollback
+    If a legitimate process was killed, restart it from the service
+    manager or process supervisor.
+    """
 
-    skill_content = f"---\n{yaml.dump(frontmatter, default_flow_style=False).strip()}\n---\n{body}"
+        skill_content = f"---\n{yaml.dump(frontmatter, default_flow_style=False).strip()}\n---\n{body}"
     SKILL_FILE.write_text(skill_content)
 
     rel_path = (SKILL_FILE.relative_to(PROJECT_ROOT)
@@ -189,7 +265,7 @@ def parse_skill_triggers(skill_path: Path) -> list[str]:
         return []
 
 
-def simulate_turn_3() -> None:
+def simulate_turn_3(live: bool = False) -> None:
     """Turn 3: Verification in Fresh Context Window.
 
     Simulates a session reset, spawns a new rogue process, and
@@ -206,6 +282,44 @@ def simulate_turn_3() -> None:
         print("✗ [Verification FAILURE] SKILL.md not found.")
         _safe_kill(new_pid)
         raise RuntimeError("SKILL.md was not created by Turn 2")
+
+    if live:
+        print("[Hermes Action (Live)] Simulating Turn 3 with Gemini...")
+        prompt = f"Run the standard CPU sweep. I have already set up a test process with PID {new_pid} for you to sweep."
+
+        # In a real environment, we would load the SKILL.md and pass it as context.
+        skill_content = SKILL_FILE.read_text()
+        context = [
+            {"role": "user", "parts": "Here are your available skills:\n" + skill_content},
+            {"role": "model", "parts": "I understand. I have loaded my skills."}
+        ]
+
+        try:
+            response = send_prompt(prompt, context=context)
+            print(f"[Hermes Response]\n{response}")
+
+            # Extract bash blocks
+            import re
+            bash_commands = re.findall(r'```bash\n(.*?)\n```', response, re.DOTALL)
+            if not bash_commands:
+                bash_commands = re.findall(r'```\n(.*?)\n```', response, re.DOTALL)
+
+            for cmd in bash_commands:
+                print(f"[Hermes Executing] {cmd.strip()}")
+                subprocess.run(cmd.strip(), shell=True, executable='/bin/bash')
+
+            time.sleep(0.5)
+            still_alive = _find_process(new_pid) is not None
+            if not still_alive:
+                print("✓ [Verification SUCCESS] Rogue process terminated via Gemini applying the SKILL.md runbook!")
+            else:
+                print("✗ [Verification FAILURE] Rogue process still active.")
+                raise RuntimeError(f"PID {new_pid} survived termination")
+
+        except Exception as e:
+            print(f"Error querying Gemini: {e}")
+            raise RuntimeError("Live mode failed in Turn 3")
+        return
 
     # Parse and validate the skill
     triggers = parse_skill_triggers(SKILL_FILE)
@@ -236,7 +350,7 @@ def simulate_turn_3() -> None:
         raise RuntimeError(f"PID {new_pid} survived termination")
 
 
-def main() -> int:
+def main(live: bool = False) -> int:
     """Run the full 3-turn PoC sequence. Returns exit code."""
     print("=" * 60)
     print(" PoC: Toil Reduction via SKILL.md (Self-Evolving Runbooks)")
@@ -245,9 +359,9 @@ def main() -> int:
     exit_code = 0
     pid = start_rogue_process()
     try:
-        simulate_turn_1(pid)
-        simulate_turn_2()
-        simulate_turn_3()
+        simulate_turn_1(pid, live)
+        simulate_turn_2(live)
+        simulate_turn_3(live)
         print(f"\n{'=' * 60}")
         print(" PoC Complete: Living Runbook Verified!")
         print("=" * 60)
@@ -261,4 +375,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser(description="Run the Hermes Agent PoC.")
+    parser.add_argument("--live", action="store_true", help="Run in live mode with Gemini API")
+    args = parser.parse_args()
+    sys.exit(main(live=args.live))
