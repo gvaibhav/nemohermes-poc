@@ -33,7 +33,7 @@ SKILLS_DIR = PROJECT_ROOT / "skills" / "cpu_sweep"
 SKILL_FILE = SKILLS_DIR / "SKILL.md"
 
 # Track all spawned PIDs for guaranteed cleanup
-_spawned_pids: list[int] = []
+_spawned_pids: dict[int, subprocess.Popen] = {}
 
 
 def start_rogue_process() -> int:
@@ -49,7 +49,7 @@ def start_rogue_process() -> int:
         stderr=subprocess.DEVNULL,
     )
     time.sleep(1)
-    _spawned_pids.append(proc.pid)
+    _spawned_pids[proc.pid] = proc
     print(f"[Harness] Rogue process started with PID: {proc.pid}")
     return proc.pid
 
@@ -57,12 +57,18 @@ def start_rogue_process() -> int:
 def _safe_kill(pid: int) -> bool:
     """Attempt to kill a single process by PID. Returns True if killed."""
     try:
-        os.kill(pid, signal.SIGKILL)
-        try:
-            os.waitpid(pid, 0)
-        except ChildProcessError:
-            pass
-        return True
+        proc = _spawned_pids.get(pid)
+        if proc:
+            proc.kill()
+            proc.wait()
+            return True
+        else:
+            os.kill(pid, signal.SIGKILL)
+            try:
+                os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
+            return True
     except ProcessLookupError:
         return True  # already dead
     except PermissionError:
@@ -72,7 +78,7 @@ def _safe_kill(pid: int) -> bool:
 
 def cleanup_all_spawned() -> None:
     """Terminate every rogue process we started, regardless of outcome."""
-    for pid in _spawned_pids:
+    for pid in list(_spawned_pids.keys()):
         _safe_kill(pid)
     _spawned_pids.clear()
 

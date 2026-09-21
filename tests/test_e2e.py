@@ -9,15 +9,20 @@ SKILLS_DIR = PROJECT_ROOT / "skills" / "cpu_sweep"
 SKILL_FILE = SKILLS_DIR / "SKILL.md"
 
 class TestEndToEnd(unittest.TestCase):
+    """End-to-end tests for the PoC usecases."""
+
     def setUp(self):
+        """Set up test environment by clearing skills directory."""
         if SKILLS_DIR.exists():
             shutil.rmtree(SKILLS_DIR)
 
     def tearDown(self):
+        """Clean up test environment by clearing skills directory."""
         if SKILLS_DIR.exists():
             shutil.rmtree(SKILLS_DIR)
 
     def test_e2e_poc_runner(self):
+        """Test the end-to-end PoC runner completes successfully."""
         # Run the PoC runner in a subprocess
         result = subprocess.run(
             ["python3", str(PROJECT_ROOT / "usecases" / "poc_toil_reduction_skill.py")],

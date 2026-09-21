@@ -129,10 +129,12 @@ class TestTurnSimulations(unittest.TestCase):
     """Integration tests for the full 3-turn PoC sequence."""
 
     def setUp(self):
+        """Set up test by ensuring skill file does not exist."""
         if SKILL_FILE.exists():
             SKILL_FILE.unlink()
 
     def tearDown(self):
+        """Clean up test by removing skill file and killing spawned processes."""
         if SKILL_FILE.exists():
             SKILL_FILE.unlink()
         cleanup_all_spawned()
